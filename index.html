@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小老鼠迷宮 40x40 (DFS Backtracking)</title>
+    <style>
+        :root {
+            --bg-color: #1e1e1e;
+            --panel-color: #252526;
+            --text-color: #d4d4d4;
+            --accent-color: #0e639c;
+            --btn-hover: #1177bb;
+            --wall-color: #333333;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Consolas', 'Monaco', monospace;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        h1 {
+            margin: 10px 0;
+            font-size: 1.2rem;
+            color: #4fc1ff;
+        }
+
+        .controls {
+            margin-bottom: 15px;
+            padding: 10px 20px;
+            background-color: var(--panel-color);
+            border-radius: 6px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        button {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background 0.2s, transform 0.1s;
+        }
+
+        button:hover {
+            background-color: var(--btn-hover);
+            transform: translateY(-1px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background-color: #4b4b4b;
+            color: #888;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status {
+            min-width: 180px;
+            text-align: center;
+            font-weight: bold;
+            color: #dcdcaa;
+        }
+
+        .canvas-container {
+            position: relative;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.6);
+            border: 2px solid #444;
+            background-color: #000;
+        }
+
+        canvas {
+            display: block;
+        }
+        
+        .legend {
+            margin-top: 10px;
+            font-size: 0.8rem;
+            display: flex;
+            gap: 15px;
+        }
+        .legend-item { display: flex; align-items: center; gap: 5px; }
+        .box { width: 12px; height: 12px; border: 1px solid #555; }
+    </style>
+</head>
+<body>
+
+    <h1>🐭 40x40 迷宮尋路演算法 (DFS)</h1>
+
+    <div class="controls">
+        <button id="btnGenerate">🔄 生成新迷宮</button>
+        <button id="btnSolve">▶️ 開始尋路</button>
+        <div class="status" id="statusText">等待指令...</div>
+    </div>
+
+    <div class="canvas-container">
+        <canvas id="mazeCanvas"></canvas>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item"><div class="box" style="background: #4caf50;"></div>起點</div>
+        <div class="legend-item"><div class="box" style="background: #f44336;"></div>終點</div>
+        <div class="legend-item"><div class="box" style="background: rgba(255, 235, 59, 0.4);"></div>探索路徑</div>
+        <div class="legend-item"><div class="box" style="background: rgba(100, 100, 100, 0.5);"></div>死路回溯</div>
+    </div>
+
+<script>
+/**
+ * 前端資深工程師配置：
+ * 40x40 網格，確保一定有解 (Backtracking Algorithm)
+ */
+const COLS = 40; 
+const ROWS = 40; 
+const CELL_SIZE = 16; // 適合 40 格的大小
+const WALL_WIDTH = 1; 
+const ANIMATION_SPEED = 20; 
+
+const COLORS = {
+    BG: '#1e1e1e',
+    WALL: '#555555',
+    START: '#4caf50',
+    END: '#f44336',
+    PATH_ACTIVE: 'rgba(255, 235, 59, 0.4)', // 正在走的路 (黃色半透明)
+    PATH_BACKTRACK: 'rgba(80, 80, 80, 0.5)', // 走錯的路 (灰色半透明)
+    TEXT: '#fff'
+};
+
+class Cell {
+    constructor(i, j) {
+        this.i = i;
+        this.j = j;
+        this.walls = [true, true, true, true]; // Top, Right, Bottom, Left
+        this.visited = false;
+    }
+
+    draw(ctx) {
+        const x = this.i * CELL_SIZE;
+        const y = this.j * CELL_SIZE;
+
+        ctx.strokeStyle = COLORS.WALL;
+        ctx.lineWidth = WALL_WIDTH;
+        ctx.beginPath();
+
+        if (this.walls[0]) { ctx.moveTo(x, y); ctx.lineTo(x + CELL_SIZE, y); }
+        if (this.walls[1]) { ctx.moveTo(x + CELL_SIZE, y); ctx.lineTo(x + CELL_SIZE, y + CELL_SIZE); }
+        if (this.walls[2]) { ctx.moveTo(x + CELL_SIZE, y + CELL_SIZE); ctx.lineTo(x, y + CELL_SIZE); }
+        if (this.walls[3]) { ctx.moveTo(x, y + CELL_SIZE); ctx.lineTo(x, y); }
+
+        ctx.stroke();
+    }
+
+    // 填充顏色 helper
+    fill(ctx, color) {
+        const x = this.i * CELL_SIZE;
+        const y = this.j * CELL_SIZE;
+        const padding = WALL_WIDTH; 
+        ctx.fillStyle = color;
+        ctx.fillRect(x + padding, y + padding, CELL_SIZE - padding*2, CELL_SIZE - padding*2);
+    }
+}
+
+class Maze {
+    constructor(cols, rows, canvas) {
+        this.cols = cols;
+        this.rows = rows;
+        this.canvas = canvas;
+        this.ctx = canvas.getContext('2d');
+        this.grid = [];
+        
+        this.canvas.width = cols * CELL_SIZE;
+        this.canvas.height = rows * CELL_SIZE;
+    }
+
+    init() {
+        this.grid = [];
+        for (let j = 0; j < this.rows; j++) {
+            for (let i = 0; i < this.cols; i++) {
+                this.grid.push(new Cell(i, j));
+            }
+        }
+        this.generateMazeLogic();
+        this.drawBase();
+    }
+
+    index(i, j) {
+        if (i < 0 || j < 0 || i > this.cols - 1 || j > this.rows - 1) return -1;
+        return i + j * this.cols;
+    }
+
+    generateMazeLogic() {
+        let stack = [];
+        let current = this.grid[0];
+        current.visited = true;
+
+        do {
+            let next = this.checkNeighbors(current);
+            if (next) {
+                next.visited = true;
+                stack.push(current);
+                this.removeWalls(current, next);
+                current = next;
+            } else if (stack.length > 0) {
+                current = stack.pop();
+            }
+        } while (stack.length > 0);
+        
+        this.grid.forEach(c => c.visited = false);
+    }
+
+    checkNeighbors(cell) {
+        let neighbors = [];
+        let top = this.grid[this.index(cell.i, cell.j - 1)];
+        let right = this.grid[this.index(cell.i + 1, cell.j)];
+        let bottom = this.grid[this.index(cell.i, cell.j + 1)];
+        let left = this.grid[this.index(cell.i - 1, cell.j)];
+
+        if (top && !top.visited) neighbors.push(top);
+        if (right && !right.visited) neighbors.push(right);
+        if (bottom && !bottom.visited) neighbors.push(bottom);
+        if (left && !left.visited) neighbors.push(left);
+
+        if (neighbors.length > 0) {
+            let r = Math.floor(Math.random() * neighbors.length);
+            return neighbors[r];
+        }
+        return undefined;
+    }
+
+    removeWalls(a, b) {
+        let x = a.i - b.i;
+        if (x === 1) { a.walls[3] = false; b.walls[1] = false; }
+        if (x === -1) { a.walls[1] = false; b.walls[3] = false; }
+        let y = a.j - b.j;
+        if (y === 1) { a.walls[0] = false; b.walls[2] = false; }
+        if (y === -1) { a.walls[2] = false; b.walls[0] = false; }
+    }
+
+    drawBase() {
+        this.ctx.fillStyle = COLORS.BG;
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        for (let cell of this.grid) {
+            cell.draw(this.ctx);
+        }
+
+        // 起點
+        this.grid[0].fill(this.ctx, COLORS.START);
+        // 終點
+        this.grid[this.grid.length - 1].fill(this.ctx, COLORS.END);
+        
+        // 文字標示
+        this.ctx.fillStyle = '#fff';
+        this.ctx.font = '10px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText("S", CELL_SIZE/2, CELL_SIZE/2 + 1);
+        this.ctx.fillText("E", this.canvas.width - CELL_SIZE/2, this.canvas.height - CELL_SIZE/2 + 1);
+    }
+
+    // 這裡改回你原本的老鼠圖標邏輯
+    drawMouse(cell) {
+        const x = cell.i * CELL_SIZE + CELL_SIZE / 2;
+        // Emoji 垂直置中微調 (+1px 在 16px 格子中比較剛好)
+        const y = cell.j * CELL_SIZE + CELL_SIZE / 2 + 1; 
+        
+        // 字體大小設定為格子大小減一點，避免太大
+        this.ctx.font = `${CELL_SIZE - 2}px Arial`; 
+        this.ctx.textAlign = "center";
+        this.ctx.textBaseline = "middle";
+        this.ctx.fillText("🐭", x, y);
+    }
+}
+
+class MouseSolver {
+    constructor(maze) {
+        this.maze = maze;
+        this.visited = new Set();
+        this.running = false;
+        this.abortController = null;
+    }
+
+    async solve() {
+        if (this.running) return;
+        this.running = true;
+        this.visited.clear();
+        this.abortController = new AbortController(); 
+
+        this.maze.drawBase();
+        
+        updateStatus("🐭 老鼠探索中...", true);
+
+        const start = this.maze.grid[0];
+        const end = this.maze.grid[this.maze.grid.length - 1];
+
+        try {
+            const found = await this.dfs(start, end);
+            if (found) {
+                updateStatus("🎉 抵達終點！", false);
+            } else {
+                updateStatus("⚠️ 無解", false);
+            }
+        } catch (e) {
+            console.log("尋路已中斷");
+        } finally {
+            this.running = false;
+        }
+    }
+
+    stop() {
+        if (this.running && this.abortController) {
+            this.abortController.abort();
+            this.running = false;
+            updateStatus("已停止", false);
+        }
+    }
+
+    sleep(ms) {
+        return new Promise((resolve, reject) => {
+            const id = setTimeout(resolve, ms);
+            if (this.abortController && this.abortController.signal.aborted) {
+                clearTimeout(id);
+                reject(new Error("Aborted"));
+            }
+        });
+    }
+
+    async dfs(current, target) {
+        if (this.abortController.signal.aborted) throw new Error("Aborted");
+
+        const idx = this.maze.index(current.i, current.j);
+        this.visited.add(idx);
+
+        // 1. 填入路徑顏色 (背景)
+        current.fill(this.maze.ctx, COLORS.PATH_ACTIVE);
+        // 2. 畫上老鼠圖標 (前景)
+        this.maze.drawMouse(current);
+
+        await this.sleep(ANIMATION_SPEED);
+
+        if (current === target) return true;
+
+        const neighbors = this.getValidMoves(current);
+
+        for (let next of neighbors) {
+            // 移動到下一格前，把當前格子的老鼠用「路徑色」蓋掉 (只留顏色不留老鼠)
+            current.fill(this.maze.ctx, COLORS.PATH_ACTIVE);
+            
+            if (await this.dfs(next, target)) {
+                return true;
+            }
+            
+            // 回溯回來後，老鼠要重畫在當前位置
+            current.fill(this.maze.ctx, COLORS.PATH_ACTIVE); // 先鋪底色
+            this.maze.drawMouse(current); // 再畫老鼠
+            await this.sleep(ANIMATION_SPEED);
+        }
+
+        // 死路：改為死路顏色，並補上牆壁線條以維持美觀
+        current.fill(this.maze.ctx, COLORS.PATH_BACKTRACK);
+        current.draw(this.maze.ctx); 
+        
+        return false;
+    }
+
+    getValidMoves(cell) {
+        let moves = [];
+        const { i, j, walls } = cell;
+        
+        // Top
+        if (!walls[0]) {
+            let n = this.maze.grid[this.maze.index(i, j - 1)];
+            if (n && !this.visited.has(this.maze.index(i, j - 1))) moves.push(n);
+        }
+        // Right
+        if (!walls[1]) {
+            let n = this.maze.grid[this.maze.index(i + 1, j)];
+            if (n && !this.visited.has(this.maze.index(i + 1, j))) moves.push(n);
+        }
+        // Bottom
+        if (!walls[2]) {
+            let n = this.maze.grid[this.maze.index(i, j + 1)];
+            if (n && !this.visited.has(this.maze.index(i, j + 1))) moves.push(n);
+        }
+        // Left
+        if (!walls[3]) {
+            let n = this.maze.grid[this.maze.index(i - 1, j)];
+            if (n && !this.visited.has(this.maze.index(i - 1, j))) moves.push(n);
+        }
+        
+        return moves;
+    }
+}
+
+const canvas = document.getElementById('mazeCanvas');
+const btnGenerate = document.getElementById('btnGenerate');
+const btnSolve = document.getElementById('btnSolve');
+const statusText = document.getElementById('statusText');
+
+const maze = new Maze(COLS, ROWS, canvas);
+const solver = new MouseSolver(maze);
+
+function updateStatus(msg, isProcessing) {
+    statusText.textContent = msg;
+    if (isProcessing) {
+        btnGenerate.disabled = true;
+        btnSolve.disabled = true;
+        statusText.style.color = '#ffd700';
+    } else {
+        btnGenerate.disabled = false;
+        btnSolve.disabled = false;
+        statusText.style.color = '#dcdcaa';
+    }
+}
+
+maze.init();
+
+btnGenerate.addEventListener('click', () => {
+    solver.stop();
+    maze.init();
+    updateStatus("新迷宮已生成 (40x40)", false);
+});
+
+btnSolve.addEventListener('click', () => {
+    solver.solve();
+});
+
+</script>
+</body>
+</html>
